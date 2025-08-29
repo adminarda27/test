@@ -2,15 +2,10 @@ import express from "express";
 import fetch from "node-fetch";
 import geoip from "geoip-lite";
 import session from "express-session";
-import connectRedis from "connect-redis";
-import Redis from "ioredis";
 import { sendDiscordInfo } from "./discordBot.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
-import dotenv from "dotenv";
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,19 +13,12 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Redis セッションストア設定
-const RedisStore = connectRedis(session);
-const redisClient = new Redis(process.env.REDIS_URL);
-
 app.use(session({
-  store: new RedisStore({ client: redisClient }),
-  secret: process.env.SESSION_SECRET,
+  secret: process.env.SESSION_SECRET || "テスト用秘密鍵",
   resave: false,
-  saveUninitialized: false,
-  cookie: { secure: false } // HTTPSなら true
+  saveUninitialized: true
 }));
 
-// Discord OAuth2 設定
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
