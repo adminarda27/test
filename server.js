@@ -2,6 +2,8 @@ import express from "express";
 import session from "express-session";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
 const app = express();
@@ -24,10 +26,15 @@ app.use(
   })
 );
 
+// 静的ファイルを配信
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+app.use(express.static(path.join(__dirname, "public")));
+
 // 🔹 トップページ
 app.get("/", (req, res) => {
   if (req.session.user) {
-    res.redirect("/welcome");
+    res.redirect("/welcome.html");  // 静的ファイルにリダイレクト
   } else {
     res.send(`<a href="/login">Discordでログイン</a>`);
   }
@@ -47,7 +54,6 @@ app.get("/callback", async (req, res) => {
   if (!code) return res.send("コードがありません");
 
   try {
-    // アクセストークン取得
     const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -61,11 +67,8 @@ app.get("/callback", async (req, res) => {
     });
 
     const tokenData = await tokenRes.json();
-    if (tokenData.error) {
-      return res.send("トークンエラー: " + tokenData.error_description);
-    }
+    if (tokenData.error) return res.send("トークンエラー: " + tokenData.error_description);
 
-    // ユーザー情報取得
     const userRes = await fetch("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
@@ -73,25 +76,11 @@ app.get("/callback", async (req, res) => {
     const userData = await userRes.json();
 
     req.session.user = userData;
-    res.redirect("/welcome");
+    res.redirect("/welcome.html");
   } catch (err) {
     console.error(err);
     res.send("エラーが発生しました");
   }
-});
-
-// 🔹 認証後のページ
-app.get("/welcome", (req, res) => {
-  if (!req.session.user) return res.redirect("/login");
-
-  const user = req.session.user;
-  res.send(`
-    <h1>ようこそ ${user.username}#${user.discriminator}</h1>
-    <p>ID: ${user.id}</p>
-    <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" width="100"/>
-    <br>
-    <a href="/logout">ログアウト</a>
-  `);
 });
 
 // 🔹 ログアウト
