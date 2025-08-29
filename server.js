@@ -1,46 +1,50 @@
+// server.js
 import express from "express";
-import fetch from "node-fetch";
 import session from "express-session";
+import fetch from "node-fetch";
+import dotenv from "dotenv";
 import path from "path";
-import { fileURLToPath } from "url";
-import fs from "fs";
-import { sendDiscordInfo } from "./discordBot.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
-// セッション設定
-app.use(session({ secret: "秘密鍵", resave: false, saveUninitialized: true }));
+const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+const REDIRECT_URI = process.env.REDIRECT_URI || "https://your-app.onrender.com/callback";
+const OAUTH_SCOPE = "identify";
 
-// ルート変数
-const CLIENT_ID = process.env.CLIENT_ID;
-const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI = process.env.REDIRECT_URI;
-const OAUTH_SCOPE = "identify email";
+// ---- セッション設定 ----
+app.use(
+  session({
+    secret: "super_secret_key", // 適当に変更すること
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false }, // HTTPSなら true
+  })
+);
 
-// / へのアクセスは /login にリダイレクト
-app.get("/", (req, res) => {
-  res.redirect("/login");
-});
-
-// Discord OAuth2 ログイン
+// ---- Discord OAuth2 ログイン ----
 app.get("/login", (req, res) => {
+  if (req.session.user) {
+    // すでにログイン済みなら直接 welcome へ
+    return res.redirect("/welcome");
+  }
   const url = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(
     REDIRECT_URI
   )}&response_type=code&scope=${OAUTH_SCOPE}`;
   res.redirect(url);
 });
 
-// OAuth2 コールバック
+// ---- Discord OAuth2 コールバック ----
 app.get("/callback", async (req, res) => {
   const code = req.query.code;
   if (!code) return res.redirect("/login");
 
   try {
-    const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
+    // アクセストークン取得
+    const tokenResponse = await fetch("https://discord.com/api/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -49,53 +53,54 @@ app.get("/callback", async (req, res) => {
         grant_type: "authorization_code",
         code,
         redirect_uri: REDIRECT_URI,
-        scope: OAUTH_SCOPE,
       }),
     });
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) return res.redirect("/login");
 
-    const userRes = await fetch("https://discord.com/api/users/@me", {
+    const tokenData = await tokenResponse.json();
+    if (!tokenData.access_token) {
+      console.error("Failed to get token:", tokenData);
+      return res.redirect("/login");
+    }
+
+    // ユーザー情報取得
+    const userResponse = await fetch("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
-    const userData = await userRes.json();
+    const userData = await userResponse.json();
 
-    // IP取得（X-Forwarded-For対応）
-    const ip =
-      req.headers["x-forwarded-for"]?.split(",")[0].trim() ||
-      req.connection.remoteAddress;
-
-    // Discordに送信
-    const message = `ログイン情報：
-ユーザー: ${userData.username}#${userData.discriminator}
-メール: ${userData.email || "取得不可"}
-IP: ${ip}`;
-    await sendDiscordInfo(message);
-
-    // セッション保存
-    req.session.user = {
-      username: userData.username,
-      discriminator: userData.discriminator,
-    };
+    // セッションに保存
+    req.session.user = userData;
 
     res.redirect("/welcome");
   } catch (err) {
-    console.error(err);
-    res.send("OAuth2処理でエラーが発生しました");
+    console.error("OAuth error:", err);
+    res.redirect("/login");
   }
 });
 
-// Welcome ページ
+// ---- 認証後のページ ----
 app.get("/welcome", (req, res) => {
-  const user = req.session.user;
-  if (!user) return res.redirect("/login");
+  if (!req.session.user) return res.redirect("/login");
 
-  let html = fs.readFileSync(path.join(__dirname, "public", "welcome.html"), "utf-8");
-  html = html
-    .replace("{{ username }}", user.username)
-    .replace("{{ discriminator }}", user.discriminator);
-  res.send(html);
+  res.send(`
+    <h1>Welcome, ${req.session.user.username}!</h1>
+    <p>ID: ${req.session.user.id}</p>
+    <a href="/logout">Logout</a>
+  `);
 });
 
-// サーバー起動
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// ---- ログアウト ----
+app.get("/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.redirect("/login");
+  });
+});
+
+// ---- ルート ----
+app.get("/", (req, res) => {
+  res.send('<a href="/login">Login with Discord</a>');
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
