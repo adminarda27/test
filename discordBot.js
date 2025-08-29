@@ -1,13 +1,23 @@
-import fetch from "node-fetch";
+import { Client, GatewayIntentBits } from "discord.js";
 
-const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
+
+const TOKEN = process.env.DISCORD_BOT_TOKEN; // Bot トークン
+const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID; // 送信先チャンネルID
+
+client.login(TOKEN);
 
 export async function sendDiscordInfo(message) {
-  if (!WEBHOOK_URL) return console.log("Webhook URLが未設定");
+  if (!client.isReady()) {
+    console.log("Botがまだ準備できていません");
+    return;
+  }
 
-  await fetch(WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: message })
-  });
+  const channel = await client.channels.fetch(CHANNEL_ID);
+  if (!channel) return console.log("チャンネルが見つかりません");
+  channel.send(message);
 }
+
+client.once("clientReady", () => {
+  console.log(`Logged in as ${client.user.tag}`);
+});
