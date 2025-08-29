@@ -1,0 +1,14 @@
+
+{
+  "name": "discord-geoip",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "dependencies": {
+    "express": "^4.19.2",
+    "geoip-lite": "^1.4.3",
+    "express-session": "^1.17.3",
+    "node-fetch": "^3.3.2",
+    "discord.js": "^14.11.0"
+  }
+}
