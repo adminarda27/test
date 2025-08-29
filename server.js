@@ -1,41 +1,31 @@
 import express from "express";
-import fetch from "node-fetch";
-import geoip from "geoip-lite";
 import session from "express-session";
-import { Client, GatewayIntentBits } from "discord.js";
+import fetch from "node-fetch";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
-import dotenv from "dotenv";
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
-// --- セッション ---
-app.use(session({ secret: process.env.SESSION_SECRET, resave: false, saveUninitialized: true }));
+// --- セッション設定 ---
+app.use(session({
+  secret: process.env.SESSION_SECRET || "秘密鍵",
+  resave: false,
+  saveUninitialized: true,
+  cookie: { secure: false } // HTTPS 環境なら true
+}));
 
-// --- Discord OAuth2 ---
+// --- Discord OAuth2 設定 ---
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI = process.env.REDIRECT_URI;
+const REDIRECT_URI = process.env.REDIRECT_URI; // 例: "https://test-x9iq.onrender.com/callback"
 const OAUTH_SCOPE = "identify email";
 
-// --- Discord Bot ---
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
-const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
-bot.login(BOT_TOKEN);
-
-bot.once("clientReady", () => {
-  console.log(`Logged in as ${bot.user.tag}`);
-});
-
-// --- OAuth2 ログイン ---
+// --- ログイン ---
 app.get("/login", (req, res) => {
   const url = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${OAUTH_SCOPE}`;
   res.redirect(url);
@@ -43,53 +33,44 @@ app.get("/login", (req, res) => {
 
 // --- コールバック ---
 app.get("/callback", async (req, res) => {
-  try {
-    const code = req.query.code;
-    if (!code) return res.send("Error: code not provided");
+  const code = req.query.code;
+  if (!code) return res.redirect("/login");
 
-    const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: REDIRECT_URI,
-        scope: OAUTH_SCOPE
-      })
-    });
+  // アクセストークン取得
+  const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: REDIRECT_URI,
+      scope: OAUTH_SCOPE
+    })
+  });
 
-    const tokenData = await tokenRes.json();
+  const tokenData = await tokenRes.json();
+  if (tokenData.error) return res.send("認証エラー");
 
-    const userRes = await fetch("https://discord.com/api/users/@me", {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` }
-    });
-    const userData = await userRes.json();
+  // ユーザー情報取得
+  const userRes = await fetch("https://discord.com/api/users/@me", {
+    headers: { Authorization: `Bearer ${tokenData.access_token}` }
+  });
+  const userData = await userRes.json();
 
-    const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.connection.remoteAddress;
-    const geo = geoip.lookup(ip) || {};
+  // セッションに保存
+  req.session.user = {
+    username: userData.username,
+    discriminator: userData.discriminator,
+    email: userData.email
+  };
 
-    const message = `ログイン情報：
-ユーザー: ${userData.username}#${userData.discriminator}
-メール: ${userData.email}
-IP: ${ip}
-地域: ${geo.region || "不明"} / ${geo.city || "不明"}`;
-
-    const channel = await bot.channels.fetch(CHANNEL_ID);
-    if (channel) await channel.send(message);
-
-    req.session.user = { username: userData.username, discriminator: userData.discriminator };
-    res.redirect("/welcome");
-
-  } catch (err) {
-    console.error(err);
-    res.send("Error during callback");
-  }
+  res.redirect("/welcome");
 });
 
-// --- ウェルカムページ ---
-app.get("/welcome.html", (req, res) => {
+// --- Welcome ページ ---
+app.get("/welcome", (req, res) => {
   const user = req.session.user;
   if (!user) return res.redirect("/login");
 
@@ -98,7 +79,7 @@ app.get("/welcome.html", (req, res) => {
   res.send(html);
 });
 
-// --- ルートリダイレクト ---
+// --- ルートはログインへリダイレクト ---
 app.get("/", (req, res) => res.redirect("/login"));
 
 // --- サーバー起動 ---
