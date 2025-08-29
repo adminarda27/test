@@ -1,18 +1,18 @@
 import { Client, GatewayIntentBits } from "discord.js";
+import dotenv from "dotenv";
+dotenv.config();
 
-let bot;
+export const client = new Client({
+  intents: [GatewayIntentBits.Guilds]
+});
 
-export function initBot() {
-  bot = new Client({ intents: [GatewayIntentBits.Guilds] });
-  bot.login(process.env.BOT_TOKEN);
-  bot.once("clientReady", () => {
-    console.log(`Logged in as ${bot.user.tag}`);
-  });
-}
+client.once("clientReady", () => {
+  console.log(`Logged in as ${client.user.tag}`);
+});
+
+client.login(process.env.BOT_TOKEN);
 
 export async function sendDiscordInfo(message) {
-  if (!bot) return;
-  const channel = await bot.channels.fetch(process.env.DISCORD_CHANNEL_ID);
-  if (!channel) return;
-  channel.send(message);
+  const channel = await client.channels.fetch(process.env.CHANNEL_ID);
+  if (channel?.isTextBased()) channel.send(message);
 }
