@@ -89,7 +89,7 @@ IP: ${ip}
 });
 
 // --- ウェルカムページ ---
-app.get("/welcome", (req, res) => {
+app.get("/welcome.html", (req, res) => {
   const user = req.session.user;
   if (!user) return res.redirect("/login");
 
