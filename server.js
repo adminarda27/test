@@ -1,41 +1,53 @@
 import express from "express";
+import session from "express-session";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 
 dotenv.config();
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// --- 環境変数の取得 ---
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-const REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || "http://localhost:3000/callback";
+const REDIRECT_URI = process.env.REDIRECT_URI;
 
-// 環境変数チェック
 if (!CLIENT_ID || !CLIENT_SECRET) {
   console.error("❌ DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET が設定されていません！");
   process.exit(1);
 }
 
-// --- ルートページ ---
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "secret",
+    resave: false,
+    saveUninitialized: false,
+  })
+);
+
+// 🔹 トップページ
 app.get("/", (req, res) => {
-  res.send('<a href="/login">🔑 Login with Discord</a>');
+  if (req.session.user) {
+    res.redirect("/welcome");
+  } else {
+    res.send(`<a href="/login">Discordでログイン</a>`);
+  }
 });
 
-// --- Discord ログイン ---
+// 🔹 Discord認証へ飛ばす
 app.get("/login", (req, res) => {
-  const url = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(
+  const url = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(
     REDIRECT_URI
-  )}&response_type=code&scope=identify%20guilds`;
+  )}&response_type=code&scope=identify+email`;
   res.redirect(url);
 });
 
-// --- コールバック処理 ---
+// 🔹 認証コールバック
 app.get("/callback", async (req, res) => {
   const code = req.query.code;
-  if (!code) return res.send("❌ No code returned from Discord");
+  if (!code) return res.send("コードがありません");
 
   try {
-    // --- トークン取得 ---
+    // アクセストークン取得
     const tokenRes = await fetch("https://discord.com/api/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -50,26 +62,45 @@ app.get("/callback", async (req, res) => {
 
     const tokenData = await tokenRes.json();
     if (tokenData.error) {
-      return res.send(`❌ Error: ${tokenData.error_description}`);
+      return res.send("トークンエラー: " + tokenData.error_description);
     }
 
-    // --- ユーザー情報取得 ---
+    // ユーザー情報取得
     const userRes = await fetch("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
-    const user = await userRes.json();
 
-    res.send(`<h1>✅ ログイン成功！</h1>
-              <p>ID: ${user.id}</p>
-              <p>ユーザー名: ${user.username}#${user.discriminator}</p>`);
+    const userData = await userRes.json();
+
+    req.session.user = userData;
+    res.redirect("/welcome");
   } catch (err) {
     console.error(err);
-    res.send("❌ Callback Error");
+    res.send("エラーが発生しました");
   }
 });
 
-// --- サーバー起動 ---
-const PORT = process.env.PORT || 3000;
+// 🔹 認証後のページ
+app.get("/welcome", (req, res) => {
+  if (!req.session.user) return res.redirect("/login");
+
+  const user = req.session.user;
+  res.send(`
+    <h1>ようこそ ${user.username}#${user.discriminator}</h1>
+    <p>ID: ${user.id}</p>
+    <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" width="100"/>
+    <br>
+    <a href="/logout">ログアウト</a>
+  `);
+});
+
+// 🔹 ログアウト
+app.get("/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.redirect("/");
+  });
+});
+
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
