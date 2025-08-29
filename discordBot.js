@@ -6,7 +6,7 @@ export const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-client.once("clientReady", () => {
+client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
