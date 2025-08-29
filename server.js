@@ -29,6 +29,11 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI;
 const OAUTH_SCOPE = "identify email";
 
+// トップページアクセス → /login にリダイレクト
+app.get("/", (req, res) => {
+  res.redirect("/login");
+});
+
 // ログインルート
 app.get("/login", (req, res) => {
   const url = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${OAUTH_SCOPE}`;
